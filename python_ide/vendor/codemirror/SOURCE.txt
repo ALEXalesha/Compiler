@@ -1,0 +1,4 @@
+CodeMirror 5.65.21 (npm codemirror@5.65.21): lib/codemirror.js/.css, mode/python,
+addon/edit/matchbrackets, addon/edit/closebrackets, addon/selection/active-line,
+addon/comment/comment, theme/material-darker. Лицензия MIT (LICENSE).
+https://codemirror.net/5/

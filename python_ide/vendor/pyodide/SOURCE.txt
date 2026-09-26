@@ -1,0 +1,5 @@
+Pyodide 0.29.5 (npm pyodide@0.29.5), Python 3.13.2.
+Файлы pyodide-*.js собраны скриптом make-bundle.js из pyodide.js, pyodide.asm.js,
+pyodide.asm.wasm, python_stdlib.zip и pyodide-lock.json пакета.
+Лицензия Pyodide: MPL-2.0 (LICENSE). Стандартная библиотека Python: PSF License (LICENSE-PYTHON).
+https://github.com/pyodide/pyodide
