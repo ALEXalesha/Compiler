@@ -1,0 +1,4 @@
+CodeMirror 5.65.21 (npm codemirror@5.65.21): mode/javascript, mode/clike, mode/lua, mode/sql,
+mode/ruby and addon/hint/show-hint, copied by ../make-packs.js. The core, python mode and the
+other addons are shared with web/python_ide/vendor/codemirror (not copied twice).
+Licence: MIT (LICENSE). https://codemirror.net/5/

@@ -1,0 +1,9 @@
+YoWASP Clang 22.0.0-git20542-10 (npm @yowasp/clang@22.0.0-git20542-10): Clang + LLD built for
+WebAssembly, with the wasi-libc and libc++ sysroot (target wasm32-wasip1).
+https://yowasp.org/  https://github.com/YoWASP/clang
+Files clang-core.pack.js and clang-rest.pack.js are built by ../make-packs.js from gen/bundle.js,
+gen/llvm.core*.wasm and gen/llvm-resources.tar of the package (gzip + base64, unchanged bytes;
+bundle.js gets import.meta.url replaced and its export list turned into a global).
+Licences: LLVM - Apache License 2.0 with LLVM Exceptions (LICENSE-LLVM.txt);
+wasi-libc - Apache-2.0 WITH LLVM-exception / Apache-2.0 / MIT, musl parts MIT (LICENSE-wasi-libc.txt);
+YoWASP packaging and runtime - ISC (Copyright Catherine "whitequark").
