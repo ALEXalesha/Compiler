@@ -13,7 +13,7 @@ const SHARED = window.COMPILER_SHARED || '../python_ide/';
 const BASE = '';
 const $ = (id) => document.getElementById(id);
 
-const VERSION = '1.1.0';
+const VERSION = '1.1.1';
 const STORE = 'compiler.v1';
 const THEME_KEY = 'compiler.theme';
 const UI_KEY = 'compiler.ui';
@@ -46,6 +46,7 @@ let files = {};        // name -> text
 let order = [];        // order in the file list
 let tabs = [];         // open tabs
 let active = null;
+let filePressed = null; // file of the last first press in the list (a second press renames it)
 let stdins = {};       // name -> text of the Input field for that file
 
 function defaultProject() {
@@ -436,7 +437,17 @@ function renderFiles() {
     label.textContent = name;
     row.append(badge(name), label, iconBtn('✎', 'rename', () => startRename(name, row)), iconBtn('×', 'delete', () => deleteFile(name)));
     row.onclick = () => { openTab(name); document.body.classList.remove('side-open'); };
-    row.ondblclick = () => startRename(name, row);
+    // the first click opens the file and draws the list again, so the dblclick goes to the row
+    // that is already gone: rename on the second press of the same file instead
+    row.onmousedown = (e) => {
+      if (e.button !== 0) return;
+      if (e.detail === 1) filePressed = name;
+      else if (e.detail === 2 && filePressed === name && !row.querySelector('input')) {
+        e.preventDefault();
+        startRename(name, row);
+      }
+    };
+    row.ondblclick = () => { if (row.isConnected && !row.querySelector('input')) startRename(name, row); };
     row.onkeydown = (e) => {
       if (e.key === 'Enter') openTab(name);
       else if (e.key === 'F2') { e.preventDefault(); startRename(name, row); }
