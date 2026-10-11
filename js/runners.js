@@ -45,7 +45,7 @@ class Run {
         this.finish({ status: 'error', code: 1, message: e.message });
       }
     };
-    if (job.timeoutMs > 0) this.timer = setTimeout(() => this.finish({ status: 'timeout' }), job.timeoutMs);
+    this.limit = new Limit(job.timeoutMs, () => this.finish({ status: 'timeout' }));
   }
   post(msg, transfer) { this.worker.postMessage(msg, transfer || []); }
   message(m) {
@@ -57,6 +57,16 @@ class Run {
       (m.type === 'out' ? this.job.out : this.job.err)(m.text);
     } else if (m.type === 'in') {
       if (this.job.echo) this.job.echo(m.text);
+    } else if (m.type === 'stdin-request') {
+      // the program sleeps until the person types: the time limit waits too
+      this.limit.pause();
+      Promise.resolve(this.job.ask ? this.job.ask() : null).then((text) => {
+        if (this.finished) return;
+        this.limit.resume();
+        this.job.channel.answer(text);
+      });
+    } else if (m.type === 'stdin-eof') {
+      if (this.job.onEof) this.job.onEof();
     } else if (m.type === 'done') {
       this.finish({ status: m.code === 0 ? 'ok' : 'error', code: m.code });
     } else if (this.handlers.onMessage) {
@@ -66,7 +76,7 @@ class Run {
   finish(result) {
     if (this.finished) return;
     this.finished = true;
-    clearTimeout(this.timer);
+    this.limit.clear();
     this.worker.terminate();
     if (this.url) URL.revokeObjectURL(this.url);
     result.ms = now() - this.t0;
@@ -75,6 +85,87 @@ class Run {
   stop() { this.finish({ status: 'stopped' }); }
 }
 const OUTPUT_LIMIT = 2 * 1024 * 1024;
+
+// Input of a program, inside its worker. First the lines prepared in the Input field, then -
+// when the page is cross-origin isolated and gave a SharedArrayBuffer - the worker asks the page
+// ('stdin-request') and sleeps in Atomics.wait until the person types a line (state 2) or ends
+// the input with Ctrl+D (state 3). Without the buffer (a page opened from disk) the input ends
+// with the field, and the page is told once ('stdin-eof') to show a hint about the field.
+// Buffer: Int32 [0] state (0 idle, 1 waiting, 2 line ready, 3 end of input), [1] length;
+// bytes of the line from offset 8.
+function stdinReader(text, sab) {
+  const lines = String(text || '').split('\n');
+  if (lines[lines.length - 1] === '') lines.pop();
+  let li = 0, ended = false;
+  const ctrl = sab ? new Int32Array(sab, 0, 2) : null;
+  const data = sab ? new Uint8Array(sab, 8) : null;
+  function ask() {
+    if (ended) return null;
+    if (!sab) { ended = true; self.postMessage({ type: 'stdin-eof' }); return null; }
+    Atomics.store(ctrl, 0, 1);
+    self.postMessage({ type: 'stdin-request' });
+    Atomics.wait(ctrl, 0, 1);
+    const state = Atomics.load(ctrl, 0);
+    let s = null;
+    if (state === 2) s = new TextDecoder().decode(data.slice(0, Atomics.load(ctrl, 1)));
+    else ended = true;
+    Atomics.store(ctrl, 0, 0);
+    return s;
+  }
+  return {
+    // the next line: { text, prepared } or null at the end of input
+    line() {
+      if (li < lines.length) return { text: lines[li++].replace(/\r$/, ''), prepared: true };
+      const s = ask();
+      return s === null ? null : { text: s, prepared: false };
+    },
+    // everything up to the end of input (Ctrl+D), as one text with line breaks
+    rest() {
+      let out = lines.slice(li).join('\n') + (li < lines.length ? '\n' : '');
+      li = lines.length;
+      for (let s = ask(); s !== null; s = ask()) out += s + '\n';
+      return out;
+    },
+    ask,
+  };
+}
+
+// The page's end of the input channel: one per run, its buffer goes to the worker.
+class StdinChannel {
+  constructor() {
+    this.sab = new SharedArrayBuffer(8 + 65536);
+    this.ctrl = new Int32Array(this.sab, 0, 2);
+    this.data = new Uint8Array(this.sab, 8);
+  }
+  // text - the typed line (without the line break), null - end of input
+  answer(text) {
+    if (text === null) Atomics.store(this.ctrl, 0, 3);
+    else {
+      let b = new TextEncoder().encode(text);
+      if (b.length > this.data.length) b = b.subarray(0, this.data.length);
+      this.data.set(b);
+      Atomics.store(this.ctrl, 1, b.length);
+      Atomics.store(this.ctrl, 0, 2);
+    }
+    Atomics.notify(this.ctrl, 0);
+  }
+  // Can this page give a SharedArrayBuffer to a worker? Only a cross-origin isolated page can
+  // (COOP/COEP from the server, coi-serviceworker on GitHub Pages, the app's headers).
+  static available() {
+    if (typeof SharedArrayBuffer !== 'function' || typeof Atomics !== 'object') return false;
+    if (self.crossOriginIsolated) return true;
+    try { new MessageChannel().port1.postMessage(new SharedArrayBuffer(8)); return true; } catch (e) { return false; }
+  }
+}
+
+// Time limit that does not run while the program waits for the person to type.
+class Limit {
+  constructor(ms, onExpire) { this.ms = ms; this.onExpire = onExpire; this.timer = null; this.left = ms; this.start(); }
+  start() { if (this.ms > 0 && this.left > 0) { this.t0 = now(); this.timer = setTimeout(this.onExpire, this.left); } }
+  pause() { if (this.timer) { clearTimeout(this.timer); this.timer = null; this.left -= now() - this.t0; } }
+  resume() { if (!this.timer && this.ms > 0) this.start(); }
+  clear() { clearTimeout(this.timer); this.timer = null; this.left = 0; }
+}
 
 // Output batching used inside workers: a busy program posts its output in pieces, by size or
 // by elapsed time, so the page shows it while the program is still running.
@@ -106,8 +197,9 @@ function workerOutput() {
 // JavaScript. The program is the worker script itself, after a prelude (console, input(),
 // timers, process.stdout). Line numbers of errors come from the worker's error events minus the
 // prelude's lines.
-function jsPrelude(stdinText, workerOutputSrc) {
+function jsPrelude(stdinText, sab, workerOutputSrc, stdinReaderSrc) {
   const io = workerOutputSrc();
+  const stdin = stdinReaderSrc(stdinText, sab);
   const emit = io.emit;
   const post = (type, data) => self.postMessage(Object.assign({ type }, data));
 
@@ -162,16 +254,13 @@ function jsPrelude(stdinText, workerOutputSrc) {
   };
   Object.defineProperty(self, 'console', { value: con, configurable: true, writable: true });
 
-  const lines = String(stdinText).split('\n');
-  if (lines[lines.length - 1] === '') lines.pop();
-  let li = 0;
   function readLine(question) {
     if (question !== undefined && question !== null && question !== '') emit('out', String(question));
-    if (li >= lines.length) return null;
-    const l = lines[li++].replace(/\r$/, '');
     io.flush();
-    post('in', { text: l + '\n' });
-    return l;
+    const r = stdin.line();
+    if (!r) return null;
+    if (r.prepared) post('in', { text: r.text + '\n' });   // a typed line is echoed by the page
+    return r.text;
   }
   self.input = readLine;
   self.prompt = readLine;
@@ -194,11 +283,7 @@ function jsPrelude(stdinText, workerOutputSrc) {
     if (name === 'fs' || name === 'node:fs') {
       return {
         readFileSync(f) {
-          if (f === 0 || f === '/dev/stdin') {
-            const rest = lines.slice(li).join('\n') + (li < lines.length ? '\n' : '');
-            li = lines.length;
-            return rest;
-          }
+          if (f === 0 || f === '/dev/stdin') { io.flush(); return stdin.rest(); }
           throw new Error('there are no files in the browser: ' + f);
         },
       };
@@ -279,10 +364,13 @@ class JsRunner {
   async prepare() { this.env.onState('ready'); }
   // job.lineMap: generated line -> original line (TypeScript); job.fileLabel: name for messages
   run(job) {
-    const head = `(${jsPrelude.toString()})(${JSON.stringify(job.stdin || '')}, ${workerOutput.toString()});\n`;
-    const offset = head.split('\n').length - 1;
+    // the prelude is one statement; the buffer of the input channel arrives in the first message
+    const head = `self.onmessage = (e) => { self.onmessage = null; self.__sab = e.data.sab; importScripts(e.data.program); };\n`;
+    const prelude = `(${jsPrelude.toString()})(${JSON.stringify(job.stdin || '')}, self.__sab || null, ${workerOutput.toString()}, ${stdinReader.toString()});\n`;
+    const offset = prelude.split('\n').length - 1;
     const code = job.code !== undefined ? job.code : job.files[job.entry];
-    const source = head + code + '\n;self.__programEnd();\n';
+    const programUrl = URL.createObjectURL(new Blob([prelude + code + '\n;self.__programEnd();\n'], { type: 'text/javascript' }));
+    const source = head;
     const file = job.entry;
     const mapLine = (l) => {
       if (!l || l <= offset) return null;
@@ -323,8 +411,9 @@ class JsRunner {
         run.finish({ status: 'error', code: 1 });
       },
     });
+    r.post({ sab: job.channel ? job.channel.sab : null, program: programUrl });
     this.current = r;
-    return r.promise.then((res) => { this.current = null; res.diagnostics = diagnostics; return res; });
+    return r.promise.then((res) => { this.current = null; URL.revokeObjectURL(programUrl); res.diagnostics = diagnostics; return res; });
   }
   stop() { if (this.current) this.current.stop(); }
 }
@@ -499,7 +588,7 @@ function clangWorkerMain() {
   };
 }
 
-function execWorkerMain(wasiFactorySrc, workerOutputSrc) {
+function execWorkerMain(wasiFactorySrc, workerOutputSrc, stdinReaderSrc) {
   const W = wasiFactorySrc();
   const io = workerOutputSrc();
   self.onmessage = async (e) => {
@@ -510,6 +599,12 @@ function execWorkerMain(wasiFactorySrc, workerOutputSrc) {
       const module = await WebAssembly.compile(m.wasm);
       const wasi = W.createWasi({
         args: [m.name], env: { LANG: 'C.UTF-8' }, stdin: new TextEncoder().encode(m.stdin || ''),
+        // after the Input field: one typed line at a time (null - end of input)
+        more: (() => {
+          const reader = stdinReaderSrc('', m.sab || null);
+          const enc = new TextEncoder();
+          return () => { io.flush(); const s = reader.ask(); return s === null ? null : enc.encode(s + '\n'); };
+        })(),
         write: (fd, bytes) => io.emit(fd === 2 ? 'err' : 'out', dec[fd].decode(bytes, { stream: true })),
       });
       const instance = await WebAssembly.instantiate(module, wasi.imports(module));
@@ -619,11 +714,11 @@ class ClangRunner {
     const diagnostics = ClangRunner.parse(c.stderr);
     if (c.stderr) (c.ok ? (job.warn || job.err) : job.err)(c.stderr.replace(/\n?$/, '\n'));
     if (!c.ok) return { status: 'compile-error', code: c.code || 1, ms: 0, compileMs: c.ms, diagnostics };
-    const source = `(${execWorkerMain.toString()})(${self.wasiFactory.toString()}, ${workerOutput.toString()});`;
+    const source = `(${execWorkerMain.toString()})(${self.wasiFactory.toString()}, ${workerOutput.toString()}, ${stdinReader.toString()});`;
     let trap = null;
     const r = new Run(source, job, { onMessage: (m) => { if (m.type === 'trap') trap = m; } });
     this.current = r;
-    r.post({ wasm: c.wasm, stdin: job.stdin || '', name: job.entry.replace(/\.\w+$/, '') }, [c.wasm.buffer]);
+    r.post({ wasm: c.wasm, stdin: job.stdin || '', sab: job.channel ? job.channel.sab : null, name: job.entry.replace(/\.\w+$/, '') }, [c.wasm.buffer]);
     const res = await r.promise;
     this.current = null;
     if (trap) { res.status = 'error'; res.trap = trap.message; }
@@ -663,6 +758,8 @@ class PythonRunner {
           out: (t) => this.sink && this.sink.out(t),
           err: (t) => this.sink && this.sink.err(t.replace(/\/home\/pyodide\//g, '')),
           stdin: (t) => this.sink && this.sink.echo && this.sink.echo(t + '\n'),
+          request: () => this.sink && this.sink.request && this.sink.request(),
+          eof: () => this.sink && this.sink.onEof && this.sink.onEof(),
           state: (s, info) => {
             if (s === 'ready' && this.state !== 'ready') { this.state = 'ready'; this.env.onState('ready', { version: 'Python ' + (info && info.version || '') }); }
             if (s === 'failed') { this.state = 'failed'; this.env.onState('failed', info); }
@@ -693,17 +790,29 @@ class PythonRunner {
     await this.prepare();
     if (this.rt.state !== 'ready') await new Promise((r) => { const t = setInterval(() => { if (this.rt.state === 'ready') { clearInterval(t); r(); } }, 50); });
     let errText = '';
-    this.sink = { out: job.out, err: (t) => { errText += t; job.err(t); }, echo: job.echo };
+    let limit = null;
+    this.sink = {
+      out: job.out, err: (t) => { errText += t; job.err(t); }, echo: job.echo, onEof: job.onEof,
+      // the program waits for a typed line: the time limit waits too
+      request: () => {
+        if (limit) limit.pause();
+        Promise.resolve(job.ask ? job.ask() : null).then((text) => {
+          if (this.rt.state !== 'running') return;
+          if (limit) limit.resume();
+          job.channel.answer(text);
+        });
+      },
+    };
     const lines = String(job.stdin || '').split('\n');
     if (lines[lines.length - 1] === '') lines.pop();
     const files = {};
     for (const [n, t] of Object.entries(job.files)) if (/\.py$/.test(n)) files[n] = t;
     const t0 = now();
     let timedOut = false;
-    const timer = job.timeoutMs > 0 ? setTimeout(() => { timedOut = true; this.rt.stop(); }, job.timeoutMs) : null;
+    limit = new Limit(job.timeoutMs, () => { timedOut = true; this.rt.stop(); });
     this.stopping = false;
-    const r = await this.rt.run(files, job.entry, lines);
-    clearTimeout(timer);
+    const r = await this.rt.run(files, job.entry, lines, job.channel ? job.channel.sab : null);
+    limit.clear();
     this.sink = null;
     const ms = r.ms || now() - t0;
     if (r.stopped) return { status: timedOut ? 'timeout' : 'stopped', ms: now() - t0, diagnostics: [] };
@@ -715,16 +824,14 @@ class PythonRunner {
 
 // ---------------------------------------------------------------------------------------
 // Lua 5.3: Fengari in a fresh worker for every run. print/io.write/io.read go to the page.
-function luaWorkerMain(workerOutputSrc) {
+function luaWorkerMain(workerOutputSrc, stdinReaderSrc) {
   const io = workerOutputSrc();
   self.onmessage = (e) => {
     const m = e.data;
     const { lua, lauxlib, lualib, to_luastring: L$, to_jsstring: J$ } = self.fengari;
     const L = lauxlib.luaL_newstate();
     lualib.luaL_openlibs(L);
-    const lines = String(m.stdin || '').split('\n');
-    if (lines[lines.length - 1] === '') lines.pop();
-    let li = 0;
+    const stdin = stdinReaderSrc(m.stdin || '', m.sab || null);
     const tostr = (i) => { const s = lauxlib.luaL_tolstring(L, i); lua.lua_pop(L, 1); return J$(s); };
     lua.lua_register(L, L$('print'), (L) => {
       const n = lua.lua_gettop(L);
@@ -739,17 +846,16 @@ function luaWorkerMain(workerOutputSrc) {
       return 0;
     });
     lua.lua_register(L, L$('__readline'), (L) => {
-      if (li >= lines.length) { lua.lua_pushnil(L); return 1; }
-      const l = lines[li++].replace(/\r$/, '');
       io.flush();
-      self.postMessage({ type: 'in', text: l + '\n' });
-      lua.lua_pushstring(L, L$(l));
+      const r = stdin.line();
+      if (!r) { lua.lua_pushnil(L); return 1; }
+      if (r.prepared) self.postMessage({ type: 'in', text: r.text + '\n' });
+      lua.lua_pushstring(L, L$(r.text));
       return 1;
     });
     lua.lua_register(L, L$('__readall'), (L) => {
-      const rest = lines.slice(li).join('\n') + (li < lines.length ? '\n' : '');
-      li = lines.length;
-      lua.lua_pushstring(L, L$(rest));
+      io.flush();
+      lua.lua_pushstring(L, L$(stdin.rest()));
       return 1;
     });
     // io.read with the formats of Lua 5.3: "l", "L", "n", "a" (with or without "*") and numbers
@@ -833,7 +939,7 @@ class LuaRunner {
     return this.prepare().then(() => {
       // fengari-web is written for a page: it takes `window` (here the worker's global) and runs
       // <script type="application/lua"> of `document` only when there is a document.
-      const source = ['(function (window, document) {', this.fengari, '}).call(self, self, undefined);', `(${luaWorkerMain.toString()})(${workerOutput.toString()});`].join('\n');
+      const source = ['(function (window, document) {', this.fengari, '}).call(self, self, undefined);', `(${luaWorkerMain.toString()})(${workerOutput.toString()}, ${stdinReader.toString()});`].join('\n');
       const diagnostics = [];
       const r = new Run(source, job, {
         onMessage: (m) => {
@@ -847,7 +953,7 @@ class LuaRunner {
         },
       });
       this.current = r;
-      r.post({ code: job.files[job.entry], name: job.entry, stdin: job.stdin || '' });
+      r.post({ code: job.files[job.entry], name: job.entry, stdin: job.stdin || '', sab: job.channel ? job.channel.sab : null });
       return r.promise.then((res) => { this.current = null; res.diagnostics = diagnostics; return res; });
     });
   }
@@ -961,7 +1067,7 @@ class SqlRunner {
 // ---------------------------------------------------------------------------------------
 // Ruby 3.4 (ruby.wasm). Starting the Ruby VM takes seconds, so a spare worker with a started VM
 // is kept ready; every run uses a fresh VM (no state left from the previous run).
-function rubyWorkerMain(workerOutputSrc) {
+function rubyWorkerMain(workerOutputSrc, stdinReaderSrc) {
   const io = workerOutputSrc();
   let vm = null;
   const outLog = (...a) => io.emit('out', a.join(' ') + '\n');
@@ -985,6 +1091,9 @@ function rubyWorkerMain(workerOutputSrc) {
     self.__out = (s) => io.emit('out', String(s));
     self.__err = (s) => io.emit('err', String(s));
     self.__in = (s) => { io.flush(); self.postMessage({ type: 'in', text: String(s) }); };
+    // after the Input field (a StringIO): typed lines; "" means the end of input
+    const more = stdinReaderSrc('', m.sab || null);
+    self.__more = () => { io.flush(); const s = more.ask(); return s === null ? '' : s + '\n'; };
     self.__rberr = (line, message) => self.postMessage({ type: 'rberror', line: Number(line), message: String(message) });
     let code = 0;
     try {
@@ -1012,9 +1121,26 @@ end
 class CompilerIn < StringIO
   def gets(*a)
     l = super
-    JS.global.call(:__in, l) if l
-    l
+    if l
+      JS.global.call(:__in, l)
+      return l
+    end
+    m = JS.global.call(:__more).to_s
+    m.empty? ? nil : m
   end
+  def read(*a)
+    s = super(*a) || ""
+    while (m = JS.global.call(:__more).to_s) != ""
+      s += m
+    end
+    s
+  end
+  def each_line
+    while (l = gets)
+      yield l
+    end
+  end
+  def readlines = [].tap { |a| each_line { |l| a << l } }
 end
 $stdout = CompilerIO.new(:__out)
 $stderr = CompilerIO.new(:__err)
@@ -1069,7 +1195,7 @@ class RubyRunner {
   }
   // A worker with a started Ruby VM: resolves { source, worker, version } when it is ready.
   spawn() {
-    const source = [this.glue, `(${rubyWorkerMain.toString()})(${workerOutput.toString()});`].join('\n;\n');
+    const source = [this.glue, `(${rubyWorkerMain.toString()})(${workerOutput.toString()}, ${stdinReader.toString()});`].join('\n;\n');
     const url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
     const worker = new Worker(url);
     const ready = new Promise((resolve, reject) => {
@@ -1096,7 +1222,7 @@ class RubyRunner {
       },
     });
     this.current = r;
-    r.post({ type: 'run', code: job.files[job.entry], name: job.entry, stdin: job.stdin || '' });
+    r.post({ type: 'run', code: job.files[job.entry], name: job.entry, stdin: job.stdin || '', sab: job.channel ? job.channel.sab : null });
     const res = await r.promise;
     this.current = null;
     res.diagnostics = diagnostics;
@@ -1107,5 +1233,5 @@ class RubyRunner {
 
 const RUNNERS = { js: JsRunner, ts: TsRunner, clang: ClangRunner, python: PythonRunner, lua: LuaRunner, sql: SqlRunner, ruby: RubyRunner };
 
-root.CompilerRunners = { RUNNERS, Run, ClangRunner, PythonRunner, formatTable, sourceMapLines, workerOutput, jsPrelude };
+root.CompilerRunners = { RUNNERS, Run, StdinChannel, Limit, stdinReader, ClangRunner, PythonRunner, formatTable, sourceMapLines, workerOutput, jsPrelude };
 })(typeof self !== 'undefined' ? self : this);

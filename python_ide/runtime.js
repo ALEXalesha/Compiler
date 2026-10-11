@@ -16,6 +16,23 @@ const WORKER_CODE = `
 'use strict';
 let py = null;
 let stdinLines = [];
+// Input after the prepared lines (the Compiler page): a SharedArrayBuffer of the page - the worker
+// sleeps in Atomics.wait until a typed line or the end of input comes. Without it (Python IDE,
+// page from disk) the input ends with the prepared lines.
+let stdinSab = null, stdinEnded = false;
+function askLine() {
+  if (stdinEnded) return null;
+  if (!stdinSab) { stdinEnded = true; post('stdin-eof'); return null; }
+  const ctrl = new Int32Array(stdinSab, 0, 2);
+  Atomics.store(ctrl, 0, 1);
+  post('stdin-request');
+  Atomics.wait(ctrl, 0, 1);
+  let s = null;
+  if (Atomics.load(ctrl, 0) === 2) s = new TextDecoder().decode(new Uint8Array(stdinSab, 8).slice(0, Atomics.load(ctrl, 1)));
+  else stdinEnded = true;
+  Atomics.store(ctrl, 0, 0);
+  return s;
+}
 const HOME = '/home/pyodide';
 let userFiles = [];
 
@@ -94,7 +111,7 @@ self.onmessage = async (e) => {
       py.setStdout({ write: (buf) => { emit('out', dec.decode(buf, { stream: true })); return buf.length; } });
       py.setStderr({ write: (buf) => { emit('err', decErr.decode(buf, { stream: true })); return buf.length; } });
       py.setStdin({ stdin: () => {
-        if (!stdinLines.length) return null;
+        if (!stdinLines.length) { flushOut(); return askLine(); }
         const line = stdinLines.shift();
         flushOut();
         post('stdin', { text: line });
@@ -113,6 +130,8 @@ self.onmessage = async (e) => {
       for (const [name, text] of Object.entries(m.files)) py.FS.writeFile(HOME + '/' + name, text);
       userFiles = Object.keys(m.files);
       stdinLines = m.stdin.slice();
+      stdinSab = m.sab || null;
+      stdinEnded = false;
       py.FS.chdir(HOME);
       const t0 = performance.now();
       const run = py.globals.get('__mix_run');
@@ -213,6 +232,8 @@ class PyRuntime {
     if (m.type === 'out') this.on.out(m.text);
     else if (m.type === 'err') this.on.err(m.text);
     else if (m.type === 'stdin') this.on.stdin && this.on.stdin(m.text);
+    else if (m.type === 'stdin-request') this.on.request && this.on.request();
+    else if (m.type === 'stdin-eof') this.on.eof && this.on.eof();
     else if (m.type === 'done') {
       const p = this.pending;
       this.pending = null;
@@ -221,12 +242,13 @@ class PyRuntime {
     }
   }
 
-  run(files, entry, stdin) {
+  // sab - optional input channel (see askLine in the worker); without it input() ends with stdin
+  run(files, entry, stdin, sab) {
     if (this.state !== 'ready') return Promise.resolve({ code: -1, notReady: true });
     this.setState('running');
     return new Promise((resolve) => {
       this.pending = resolve;
-      this.worker.postMessage({ type: 'run', files, entry, stdin });
+      this.worker.postMessage({ type: 'run', files, entry, stdin, sab: sab || null });
     });
   }
 

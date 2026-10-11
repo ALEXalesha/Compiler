@@ -16,12 +16,14 @@ function wasiFactory() {
     constructor(code) { super('exit ' + code); this.code = code; }
   }
 
-  // opts: { args: [], env: {}, stdin: Uint8Array, write(fd, bytes) }
+  // opts: { args: [], env: {}, stdin: Uint8Array, write(fd, bytes), more() -> Uint8Array | null }
+  // more - when stdin is read out: the next piece of input (a typed line), null - end of input.
   function createWasi(opts) {
     const args = opts.args || ['main'];
     const env = Object.entries(opts.env || {}).map(([k, v]) => k + '=' + v);
-    const stdin = opts.stdin || new Uint8Array(0);
+    let stdin = opts.stdin || new Uint8Array(0);
     let stdinPos = 0;
+    let stdinEnded = !opts.more;
     let memory = null;
     const enc = new TextEncoder();
     const view = () => new DataView(memory.buffer);
@@ -72,6 +74,11 @@ function wasiFactory() {
       },
       fd_read(fd, iovs, iovsLen, nread) {
         if (fd !== 0) return ERRNO.BADF;
+        if (stdinPos >= stdin.length && !stdinEnded) {
+          const piece = opts.more();
+          if (piece === null) stdinEnded = true;
+          else { stdin = piece; stdinPos = 0; }
+        }
         const dv = view();
         let total = 0;
         for (let i = 0; i < iovsLen && stdinPos < stdin.length; i++) {

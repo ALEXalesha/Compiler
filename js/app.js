@@ -6,7 +6,9 @@ const I18N = window.CompilerI18n;
 const t = I18N.t;
 const Langs = window.CompilerLangs;
 const Packs = window.CompilerPacks;
-const { RUNNERS } = window.CompilerRunners;
+const { RUNNERS, StdinChannel } = window.CompilerRunners;
+// typing input while the program runs needs a cross-origin isolated page (SharedArrayBuffer)
+const LIVE_INPUT = StdinChannel.available();
 const SHARED = window.COMPILER_SHARED || '../python_ide/';
 const BASE = '';
 const $ = (id) => document.getElementById(id);
@@ -318,7 +320,7 @@ async function run() {
   const runner = runnerFor(l.runner);
   running = { runner, phase: l.runner === 'clang' || l.runner === 'ts' ? 'compile' : 'run' };
   renderStatus();
-  let errText = '';
+  let errText = '', eofHint = false;
   const job = {
     files: Object.assign({}, files), entry: name, lang: l.id, stdin: $('stdin').value, timeoutMs: limit * 1000,
     out: (s) => { if (running) running.phase = 'run'; write('out', s); },
@@ -326,7 +328,10 @@ async function run() {
     warn: (s) => write('warn', s),
     info: (s) => write('info', s),
     echo: (s) => write('in', s),
+    // the program read past the Input field and the page cannot ask the person (file://)
+    onEof: () => { if (eofHint) return; eofHint = true; write('hint-line', t('stdinMore') + '\n'); flashStdin(); },
   };
+  if (LIVE_INPUT) { job.channel = new StdinChannel(); job.ask = askLine; }
   let res;
   try {
     res = await runner.run(job);
@@ -334,12 +339,13 @@ async function run() {
     res = { status: 'failed', message: err && err.message || String(err) };
   }
   running = null;
+  closeAsk(null);
   if (res.trap) write('err', t('trap', { message: res.trap }) + '\n');
   if (res.diagnostics && res.diagnostics.length) showDiagnostics(res.diagnostics);
   const errs = (res.diagnostics || []).filter((d) => d.severity === 'error');
   if (errs.length && errs[0].file in files) gotoLine(errs[0].file, errs[0].line);
   const s = res.status;
-  if (/EOFError|undefined method 'chomp' for nil|attempt to (concatenate|perform arithmetic on) a nil value|of null \(reading|Cannot read properties of null|for nil/.test(errText) && !$('stdin').value.trim()) write('hint-line', t('stdinHint') + '\n');
+  if (/EOFError|undefined method 'chomp' for nil|attempt to (concatenate|perform arithmetic on) a nil value|of null \(reading|Cannot read properties of null|for nil/.test(errText) && !eofHint && !$('stdin').value.trim()) write('hint-line', t('stdinHint') + '\n');
   if (s === 'compile-error' && /exceptions (disabled|are disabled)|cannot use '(throw|try)'/.test(errText)) write('hint-line', t('noExceptions') + '\n');
   const line = s === 'ok' ? (res.compileMs ? t('doneOkCompile', { c: fmtS(res.compileMs), s: fmtS(res.ms) }) : t('doneOk', { s: fmtS(res.ms) }))
     : s === 'compile-error' ? t('doneCompileErr')
@@ -355,7 +361,47 @@ async function run() {
 }
 function stop() {
   if (!running) return;
+  closeAsk(null);
   running.runner.stop();
+}
+
+// ---------------------------------------------------------------- input while the program runs
+// The program waits for a line: an input box right in the output. Enter sends the line (it stays
+// in the output as typed input), Ctrl+D ends the input, Stop works as usual.
+let asking = null;   // { input, resolve }
+function askLine() {
+  closeAsk(null);
+  return new Promise((resolve) => {
+    const input = document.createElement('input');
+    input.className = 'term-in';
+    input.id = 'termIn';
+    input.spellcheck = false;
+    input.autocomplete = 'off';
+    input.setAttribute('aria-label', t('typeLine'));
+    input.placeholder = t('typeLine');
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); const v = input.value; closeAsk(v); write('in', v + '\n'); }
+      else if ((e.ctrlKey || e.metaKey) && (e.key === 'd' || e.key === 'D' || e.code === 'KeyD')) { e.preventDefault(); closeAsk(null); write('info', '^D\n'); }
+    });
+    out.appendChild(input);
+    after(0);
+    asking = { input, resolve };
+    input.focus({ preventScroll: true });
+    input.scrollIntoView({ block: 'nearest' });
+  });
+}
+function closeAsk(value) {
+  if (!asking) return;
+  const a = asking;
+  asking = null;
+  a.input.remove();
+  a.resolve(value);
+}
+function flashStdin() {
+  const box = $('stdin');
+  box.classList.remove('flash');
+  void box.offsetWidth;
+  box.classList.add('flash');
 }
 
 // ---------------------------------------------------------------- files and tabs
