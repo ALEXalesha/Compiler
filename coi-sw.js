@@ -26,6 +26,9 @@ if (typeof window === 'undefined') {
 } else {
   // ---- the page
   (() => {
+    // only a site: Electron lets file:// pages register service workers too, and a worker there
+    // broke the page of the app (the app sends the headers itself)
+    if (!/^https?:$/.test(location.protocol)) return;
     if (window.crossOriginIsolated || !window.isSecureContext || !('serviceWorker' in navigator)) return;
     const KEY = 'coiReloaded';
     let tried = false;
