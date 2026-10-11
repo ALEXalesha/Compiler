@@ -13,7 +13,7 @@ const SHARED = window.COMPILER_SHARED || '../python_ide/';
 const BASE = '';
 const $ = (id) => document.getElementById(id);
 
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const STORE = 'compiler.v1';
 const THEME_KEY = 'compiler.theme';
 const UI_KEY = 'compiler.ui';
