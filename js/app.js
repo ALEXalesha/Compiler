@@ -13,7 +13,7 @@ const SHARED = window.COMPILER_SHARED || '../python_ide/';
 const BASE = '';
 const $ = (id) => document.getElementById(id);
 
-const VERSION = '1.1.1';
+const VERSION = '1.1.2';
 const STORE = 'compiler.v1';
 const THEME_KEY = 'compiler.theme';
 const UI_KEY = 'compiler.ui';
@@ -669,6 +669,19 @@ $('runBtn').onclick = () => run();
 $('stopBtn').onclick = () => stop();
 $('newFile').onclick = () => startNewFile();
 $('sideToggle').onclick = () => document.body.classList.toggle('side-open');
+// Narrow window (1.1.2): the file list closes with a click beside it and with Esc - before only by picking a file
+const closeSide = () => document.body.classList.remove('side-open');
+document.addEventListener('pointerdown', (e) => {
+  if (document.body.classList.contains('side-open') && !e.target.closest('#sidebar, #sideToggle')) closeSide();
+}, true);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && !e.defaultPrevented && document.body.classList.contains('side-open')) closeSide();
+});
+// Height of the top bar (it wraps in a narrow window): the file list starts under it
+new ResizeObserver(() => document.documentElement.style.setProperty('--topbar-h', document.querySelector('.topbar').offsetHeight + 'px')).observe(document.querySelector('.topbar'));
+// Which scroll bar: a classic one takes room (width > 0), an overlay one does not (width 0)
+const overlayScrollbars = () => { const d = document.createElement('div'); d.style.cssText = 'position:absolute;left:-999px;top:0;width:80px;height:80px;overflow:scroll'; document.body.appendChild(d); const w = d.offsetWidth - d.clientWidth; d.remove(); return w === 0; };
+document.documentElement.classList.toggle('overlay-sb', overlayScrollbars());
 $('restoreExamples').onclick = () => {
   for (const l of Langs.LANGS) {
     const ex = Langs.example(l.id, 'hello', ui);

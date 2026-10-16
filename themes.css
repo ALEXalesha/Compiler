@@ -18,6 +18,7 @@
   --glass-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
   --glass-inset: inset 0 1px 0 rgba(255, 255, 255, 0.35), inset 0 -1px 0 rgba(0, 0, 0, 0.15);
   --blur: blur(28px) saturate(190%);
+  --glass-sat: 190%;
   --blur-strong: blur(40px) saturate(220%);
   --text: #f4f4f8;
   --text-dim: rgba(244, 244, 248, 0.62);
@@ -53,6 +54,7 @@
   --glass-shadow: 0 6px 20px rgba(0, 0, 0, 0.32);
   --glass-inset: inset 0 1px 0 rgba(255, 255, 255, 0.14);
   --blur: blur(20px) saturate(120%);
+  --glass-sat: 120%;
   --blur-strong: blur(28px) saturate(130%);
   --text: #e6e8ec;
   --text-dim: rgba(230, 232, 236, 0.55);
@@ -81,6 +83,7 @@
   --glass-shadow: 0 6px 20px rgba(30, 40, 70, 0.14);
   --glass-inset: inset 0 1px 0 rgba(255, 255, 255, 0.75);
   --blur: blur(18px) saturate(130%);
+  --glass-sat: 130%;
   --blur-strong: blur(26px) saturate(140%);
   --text: #1b2030;
   --text-dim: rgba(27, 32, 48, 0.58);
@@ -109,6 +112,7 @@
   --glass-shadow: 0 6px 22px rgba(0, 0, 0, 0.55);
   --glass-inset: inset 0 1px 0 rgba(255, 255, 255, 0.10);
   --blur: blur(18px) saturate(110%);
+  --glass-sat: 110%;
   --blur-strong: blur(26px) saturate(120%);
   --text: #dcdde3;
   --text-dim: rgba(220, 221, 227, 0.48);
@@ -137,6 +141,7 @@
   --glass-shadow: 0 8px 26px rgba(30, 16, 6, 0.45);
   --glass-inset: inset 0 1px 0 rgba(255, 240, 215, 0.25);
   --blur: blur(22px) saturate(150%);
+  --glass-sat: 150%;
   --blur-strong: blur(32px) saturate(170%);
   --text: #f5ead9;
   --text-dim: rgba(245, 234, 217, 0.58);

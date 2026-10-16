@@ -12,10 +12,17 @@ button, select, input, textarea { font: inherit; color: inherit; }
 svg { flex-shrink: 0; }
 
 /* --- top bar --- */
+/* Glass without backdrop-filter (1.1.2, as in WritingSpeed 1.1.1 and MediaPlayer 1.0.2): on the graphics card
+   Chromium recomputed the blur only in a band of the bar when one button was redrawn and caught the bar itself -
+   on hover the bar got a light band. Under the bar there is always the same fixed theme background: its copy with
+   background-attachment: fixed and a plain filter: saturate looks the same without reading the backdrop. */
 .topbar {
   display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 7px 12px; flex-shrink: 0;
-  background: var(--glass-bg); border-bottom: 1px solid var(--glass-border); backdrop-filter: var(--blur);
+  border-bottom: 1px solid var(--glass-border); position: relative; isolation: isolate;
 }
+.topbar::before, .topbar::after { content: ''; position: absolute; inset: 0; z-index: -1; pointer-events: none; }
+.topbar::before { background: var(--app-bg); background-color: var(--app-base); background-attachment: fixed; filter: saturate(var(--glass-sat)); }
+.topbar::after { background: var(--glass-bg); }
 .title { display: flex; align-items: center; gap: 8px; font-weight: 600; font-size: 14px; margin-right: 6px; white-space: nowrap; }
 .title svg { width: 22px; height: 22px; }
 .btn {
@@ -52,6 +59,9 @@ select option { background: var(--app-base); color: var(--text); }
 }
 .side-h { display: flex; align-items: center; justify-content: space-between; padding: 8px 8px 6px 12px; font-size: 11px; letter-spacing: .5px; text-transform: uppercase; color: var(--text-dim); }
 .files { flex: 1; overflow-y: auto; padding-bottom: 6px; }
+/* An overlay scroll bar (Chrome on Windows 11, macOS) takes no room and is drawn over the right edge of the rows -
+   without this padding it covered the × button (1.1.2). The class is set by a measurement in app.js. */
+:root.overlay-sb .files { padding-right: 14px; }
 .file { display: flex; align-items: center; gap: 6px; padding: 3px 6px 3px 12px; cursor: pointer; border-radius: 0; }
 .file:hover { background: rgba(var(--ink) / 0.07); }
 .file.active { background: rgba(var(--accent-rgb) / 0.22); }
@@ -157,7 +167,8 @@ body li.CodeMirror-hint-active { background: var(--accent); color: var(--on-acce
   .btn .label { display: none; }
   select { max-width: 120px; }
   #sideToggle { display: inline-grid; }
-  .sidebar { position: fixed; left: 0; top: 0; bottom: 0; z-index: 35; width: 230px; transform: translateX(-100%); transition: transform .15s; background: var(--app-base); }
+  /* the list starts under the top bar (app.js sets its height): ☰ stays visible over the open list and closes it */
+  .sidebar { position: fixed; left: 0; top: var(--topbar-h, 0px); bottom: 0; z-index: 35; width: 230px; transform: translateX(-100%); transition: transform .15s; background: var(--app-base); }
   body.side-open .sidebar { transform: none; box-shadow: var(--glass-shadow); }
   .panel { flex-direction: column; height: 42%; }
   .stdin-box { width: auto; height: 34%; border-left: none; border-top: 1px solid var(--glass-border); }
