@@ -1,0 +1,22 @@
+{
+  "name": "compiler",
+  "version": "1.1.3",
+  "private": true,
+  "description": "Compiler: C, C++, Python, JavaScript, TypeScript, Lua, Ruby and SQL in the browser - offline, no server; Clang 22 compiles C/C++ to WebAssembly",
+  "author": "ALEXalesha",
+  "license": "MIT",
+  "homepage": "https://alexalesha.github.io/Compiler/",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ALEXalesha/Compiler.git"
+  },
+  "scripts": {
+    "test": "playwright test",
+    "mutate": "node tests/mutate.js",
+    "screenshots": "node tools/screenshots.js",
+    "packs": "node vendor/make-packs.js"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1"
+  }
+}
