@@ -13,7 +13,7 @@ const SHARED = window.COMPILER_SHARED || '../python_ide/';
 const BASE = '';
 const $ = (id) => document.getElementById(id);
 
-const VERSION = '1.1.2';
+const VERSION = '1.1.3';
 const STORE = 'compiler.v1';
 const THEME_KEY = 'compiler.theme';
 const UI_KEY = 'compiler.ui';
@@ -435,7 +435,8 @@ function renderFiles() {
     const label = document.createElement('span');
     label.className = 'file-name';
     label.textContent = name;
-    row.append(badge(name), label, iconBtn('✎', 'rename', () => startRename(name, row)), iconBtn('×', 'delete', () => deleteFile(name)));
+    // the last file stays: its × says why instead of doing nothing
+    row.append(badge(name), label, iconBtn('✎', 'rename', () => startRename(name, row)), iconBtn('×', order.length > 1 ? 'delete' : 'lastFile', () => deleteFile(name)));
     row.onclick = () => { openTab(name); document.body.classList.remove('side-open'); };
     // the first click opens the file and draws the list again, so the dblclick goes to the row
     // that is already gone: rename on the second press of the same file instead
@@ -470,7 +471,8 @@ function renderTabs() {
     label.textContent = name;
     const dot = document.createElement('span');
     dot.className = 'dot';
-    tab.append(badge(name), label, dot, iconBtn('×', 'closeTab', () => closeTab(name)));
+    // the last tab stays: its × says why instead of doing nothing
+    tab.append(badge(name), label, dot, iconBtn('×', tabs.length > 1 ? 'closeTab' : 'lastTab', () => closeTab(name)));
     tab.onclick = () => openTab(name);
     tab.onauxclick = (e) => { if (e.button === 1) closeTab(name); };
     tab.onkeydown = (e) => { if (e.key === 'Enter') openTab(name); };
@@ -495,7 +497,7 @@ function openTab(name) {
   if (el && el.scrollIntoView) el.scrollIntoView({ block: 'nearest', inline: 'nearest' });
 }
 function closeTab(name) {
-  if (tabs.length <= 1) return;
+  if (tabs.length <= 1) { toast(t('lastTab')); return; }
   const i = tabs.indexOf(name);
   tabs.splice(i, 1);
   if (active === name) openTab(tabs[Math.min(i, tabs.length - 1)]);
@@ -510,7 +512,7 @@ function addFile(name, text, stdin) {
   save();
 }
 function deleteFile(name) {
-  if (order.length <= 1) return;
+  if (order.length <= 1) { toast(t('lastFile')); return; }
   const snapshot = { text: files[name], pos: order.indexOf(name), tabPos: tabs.indexOf(name), stdin: stdins[name], wasActive: active === name };
   delete files[name];
   delete docs[name];
