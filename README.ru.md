@@ -1,0 +1,91 @@
+<div align="center">
+
+# Компилятор
+
+**«Компилятор» (Compiler) запускает программы на восьми языках прямо в браузере: C, C++, Python, JavaScript, TypeScript, Lua, Ruby и SQL. Сервера нет: компиляторы и интерпретаторы - WebAssembly и JavaScript внутри страницы, работает без интернета - с сайта или прямо с диска (`index.html`).**
+
+[**▶ Открыть онлайн →**](https://alexalesha.github.io/Compiler/) &nbsp;·&nbsp; [Скачать для Windows](https://github.com/ALEXalesha/Compiler/releases/latest) &nbsp;·&nbsp; [English version of this file](README.md)
+
+[![Status](https://img.shields.io/badge/status-stable-brightgreen)](#) [![Release](https://img.shields.io/github/v/release/ALEXalesha/Compiler)](https://github.com/ALEXalesha/Compiler/releases/latest) [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE) [![HTML5](https://img.shields.io/badge/HTML5-E34F26?logo=html5&logoColor=white)](https://developer.mozilla.org/docs/Web/HTML) [![Website](https://img.shields.io/badge/Website-open-0A84FF?logo=googlechrome&logoColor=white)](https://alexalesha.github.io/Compiler/) [![Built with Claude Code](https://img.shields.io/badge/Built_with-Claude_Code-D97757?logo=claude&logoColor=white)](https://claude.com/claude-code)
+
+Код, тесты и документация этого проекта написаны Claude (Anthropic) в Claude Code. Идеи, проверка и решения - Алексей.
+
+</div>
+
+Интерфейс на русском и английском (кнопка RU/EN в шапке).
+
+![C++ скомпилирован в WebAssembly и запущен](docs/screens/cpp.png)
+
+![Ошибка компиляции: строка подсвечена, курсор переходит к ней](docs/screens/c-error.png)
+
+## Языки
+
+| Язык | Движок | Как запускается | Загрузка при первом выборе |
+|---|---|---|---|
+| C | Clang 22 + LLD ([YoWASP](https://yowasp.org/)), wasi-libc | компиляция в WebAssembly (C17, `-O2`), запуск небольшим хостом WASI | ~50 МБ, общие с C++ |
+| C++ | тот же Clang, libc++ | C++20, `-O2`; `<iostream>` заранее скомпилирован, небольшая программа собирается за 1-5 с вместо 10-15 | (те же) |
+| Python | [Pyodide](https://pyodide.org/) 0.29.5 (Python 3.13) | интерпретатор в отдельном потоке; другие файлы `.py` проекта импортируются | ~16 МБ |
+| JavaScript | движок самого браузера | программа - сценарий потока; `console.log`, `input()`, таймеры | ничего |
+| TypeScript | [TypeScript](https://www.typescriptlang.org/) 5.9.3 | проверка типов (strict), потом JavaScript; ошибка типов останавливает запуск, как у компилятора | ~2 МБ |
+| Lua | [Fengari](https://fengari.io/) 0.1.4 (Lua 5.3) | интерпретатор в потоке; `print`, `io.read`, `io.write` | 0,1 МБ |
+| Ruby | [ruby.wasm](https://github.com/ruby/ruby.wasm) 2.10.1 (Ruby 3.4 со стандартной библиотекой) | новая машина Ruby на каждый запуск (запасная прогревается заранее) | ~12 МБ |
+| SQL | [sql.js](https://sql.js.org/) 1.14.2 (SQLite) | новая пустая база на каждый запуск; операторы по одному, таблицы результатов в выводе | 0,4 МБ |
+
+Движок грузится при первом выборе языка (вкладка с файлом этого языка), а не при открытии страницы.
+
+## Что умеет
+
+- **Редактор** (CodeMirror 5): подсветка всех языков, подсказки (ключевые слова и имена из файла; Ctrl+Space или просто при наборе), скобки, комментарий строки (Ctrl+/).
+- **Файлы и вкладки**: список файлов (новый, переименовать, удалить с отменой) и вкладки; язык задаёт расширение. Всё сохраняется в браузере (`localStorage`, ключи `compiler.*`); если хранилище запрещено, страница работает дальше. **Открыть** читает файлы с диска, **Скачать** сохраняет текущий файл.
+- **Запуск**: «Запустить» (Ctrl+Enter или F5) и «Стоп» (Shift+F5). Каждая программа - в своём Web Worker, поэтому бесконечный цикл не вешает страницу: его обрывает **предел времени** (2, 5, 10, 30, 60 с или без предела) или «Стоп».
+- **Ввод по ходу программы**: когда программа ждёт строку (`input()`, `cin`, `scanf`, `gets`, `io.read`, `prompt()`), поле ввода появляется прямо в выводе. Enter отправляет строку, Ctrl+D - конец ввода, «Стоп» работает во время ожидания, а ожидание не тратит предел времени. Сначала идут строки поля «Ввод (stdin)», так что проверочный ввод можно приготовить заранее. Поток программы спит в `Atomics.wait` на `SharedArrayBuffer`; на сайте изоляцию страницы даёт `coi-sw.js` (маленький service worker, мысль [coi-serviceworker](https://github.com/gzuidhof/coi-serviceworker), MIT): при первом заходе страница один раз перезагружается.
+- **Ошибки**: сообщения компилятора и ошибки выполнения указывают на строку: она подсвечена, на полях знак, курсор переходит к первой ошибке, `файл:строка` в выводе - ссылка.
+- **Примеры** для каждого языка: «Привет, мир», циклы, рекурсия, сортировка, ввод данных.
+- **Оформление**: пять тем (Стеклянная, Строгая, Светлая, Ночная, Тёплая - как в Paint Pro), вид для телефона.
+
+![Python в светлой теме, английский интерфейс](docs/screens/python-light.png)
+
+![На телефоне](docs/screens/phone.png)
+
+### Ограничения
+
+- Страницу, открытую с диска (`file://`), изолировать нельзя: там программа читает только поле «Ввод», а когда ей нужно больше, появляется подсказка и поле мигает. С сайта или с локального сервера ввод в выводе работает.
+- C/C++: нет файлов, потоков и сокетов (WASI без файловой системы); исключения C++ выключены (`-fno-exceptions`: в сборке libc++ для WebAssembly их нет), `throw`/`try` дают ошибку компиляции с подсказкой. `#include <bits/stdc++.h>` работает. Стек 8 МБ.
+- Python: только стандартная библиотека (без `pip`).
+- Вывод больше 2 МБ останавливает программу.
+
+## Запуск у себя
+
+- **Двойной щелчок по `index.html`** (Chrome, Edge, Firefox). С диска работает всё: движки - обычные файлы `<script>` (gzip + base64), ничего не скачивается.
+- Или любой статический сервер из папки, например `npx http-server .` или `python -m http.server`, и открыть `http://localhost:8080/`.
+
+Движки пересобираются из пакетов npm командой `node vendor/make-packs.js` (версии закреплены в скрипте; он же собирает готовый `<iostream>`). Python и ядро редактора лежат в `python_ide/` (общие с Python IDE сборника Hub; где их искать, говорит `paths.js`).
+
+## Проверки
+
+```
+npm install
+npx playwright install chromium
+npm test                  # 33 закона в безголовом Chromium, по одному
+node tests/mutate.js      # проверка мутациями: 27 сломанных копий должны уронить законы
+```
+
+Законы открывают `index.html` по файловому адресу при закрытой сети: Hello на JS и вывод; бесконечный цикл обрывается пределом времени, страница отвечает; «Стоп»; ошибки JS/TS/Python/C/C++/Lua/SQL/Ruby подсвечены на своей строке; `input()` в Python; Hello на C, ошибка компиляции со строкой и номером, `scanf`, код выхода, бесконечный цикл скомпилированной программы с пределом времени; C++ с `cin` и стандартной библиотекой; примеры; файлы переживают перезагрузку; ввод по ходу программы (`tests/compiler-input.spec.js`, свой маленький сервер с заголовками COOP/COEP и без них): `prompt()` в JS, `input()` в Python, `scanf` в C, `cin`/`getline` в C++, `io.read` в Lua, `gets` в Ruby, Ctrl+D, «Стоп» во время ожидания, предел времени на паузе, изоляция страницы service worker'ом и подсказка с диска; скачать и открыть; темы (редактор следует теме); RU/EN; подсказки; ширина телефона. Проверка мутациями по одному ломает главные правила (предел времени, «Стоп», номера строк JS и TS, подсветку строки, переход к ошибке, разбор сообщений компилятора и Python, ввод, сохранение, темы, а также ввод по ходу программы: сам живой режим, паузу предела времени, строку в выводе, Ctrl+D, чтение WASI в C, подсказку с диска, заголовки service worker) в копии во временной папке и саму страницу не трогает. Захват мыши в проверках - заглушка. Картинки выше сняты без окна скриптом `tools/screenshots.js`.
+
+## История
+
+«Компилятор» сделан в сборнике [Hub](https://github.com/ALEXalesha/ALEXalesha.github.io) (папка `web/compiler`), где он - программа раздела «Программы» в «Хабе» ([открыть там](https://alexalesha.github.io/)). Этот репозиторий несёт его вместе с историей коммитов.
+
+## Лицензии
+
+Страница - MIT ([LICENSE](LICENSE)). Сторонние части, у каждой рядом текст лицензии:
+
+| Часть | Где | Лицензия |
+|---|---|---|
+| YoWASP Clang 22 (Clang, LLD), wasi-libc, libc++ | `vendor/clang/` | Apache-2.0 WITH LLVM-exception; wasi-libc - Apache-2.0 / MIT; упаковка YoWASP - ISC |
+| ruby.wasm 2.10.1 (CRuby 3.4) | `vendor/ruby/` | MIT; Ruby и библиотеки - см. NOTICE |
+| TypeScript 5.9.3 | `vendor/typescript/` | Apache-2.0 |
+| sql.js 1.14.2 (SQLite) | `vendor/sqljs/` | MIT; SQLite - общественное достояние |
+| Fengari 0.1.4 | `vendor/fengari/` | MIT |
+| CodeMirror 5.65.21 | `python_ide/vendor/codemirror/`, `vendor/codemirror/` | MIT |
+| Pyodide 0.29.5 (Python 3.13.2) | `python_ide/vendor/pyodide/` | MPL-2.0; стандартная библиотека Python - PSF |
